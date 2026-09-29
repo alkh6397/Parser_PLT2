@@ -1,581 +1,313 @@
-#include <iostream>
-#include <string>
+#include "Parser.h"
 #include <stdexcept>
-#include <cctype>
 
-using namespace std;
+Parser::Parser(std::vector<Token> toks) : tokens(std::move(toks)), pos(0) {}
 
+const Token& Parser::current() const {
+    return tokens[pos];
+}
 
-// ==================================================
-// ∞ËªÍ ∞·∞˙∏¶ ¿˙¿Â«œ¥¬ ±∏¡∂√º
-// ==================================================
+bool Parser::check(TokenType t) const {
+    return current().type == t;
+}
 
-struct Value
-{
-    bool isBool;
-
-    int intValue;
-    bool boolValue;
-
-    // ¡§ºˆ ∞™ ª˝º∫
-    static Value makeInt(int value)
-    {
-        Value result;
-        result.isBool = false;
-        result.intValue = value;
-        result.boolValue = false;
-        return result;
+Token Parser::match(TokenType expected) {
+    if (current().type != expected) {
+        error("expected " + tokenTypeName(expected) +
+              " but found " + tokenTypeName(current().type) +
+              " ('" + current().text + "')");
     }
+    Token t = current();
+    pos++;
+    return t;
+}
 
-    // ≥Ì∏Æ ∞™ ª˝º∫
-    static Value makeBool(bool value)
-    {
-        Value result;
-        result.isBool = true;
-        result.intValue = 0;
-        result.boolValue = value;
-        return result;
-    }
+void Parser::error(const std::string& msg) const {
+    throw std::runtime_error("Syntax error (line " + std::to_string(current().line) +
+                              "): " + msg);
+}
 
-    // 0¿∫ false∑Œ, 0¿Ã æ∆¥— ∞Õ¿∫ true ªÁøÎ«œ¥¯ ±‚¡∏¿« ≥Ì∏Æ
-    // ≥Ì∏ÆΩƒø°º≠ ªÁøÎ«“ bool ∞™¿∏∑Œ ∫Ø»Ø
-    bool asBool() const
-    {
-        if (isBool)
-            return boolValue;
+bool Parser::isTypeStart() const {
+    TokenType t = current().type;
+    return t == TokenType::KW_INT || t == TokenType::KW_BOOL || t == TokenType::KW_STRING;
+}
 
-        return intValue != 0;
-    }
-};
-
-
-// ==================================================
-// Parser ≈¨∑°Ω∫
-// ==================================================
-
-class Parser
-{
-private:
-
-    string input;
-    size_t pos;
-
-
-    // ----------------------------------------------
-    // ∞¯πÈ ∞«≥ ∂Ÿ±‚
-    // ----------------------------------------------
-    void skipWhitespace()
-    {
-        while (pos < input.length() &&
-            isspace(input[pos]))
-        {
-            pos++;
-        }
-    }
-
-
-    // ----------------------------------------------
-    // «ˆ¿Á ¿ßƒ°¿« πÆ¿⁄ø≠¿Ã str∞˙ ∞∞¿∫¡ˆ »Æ¿Œ
-    // ∞∞¿∏∏È «ÿ¥Á πÆ¿⁄ø≠∏∏≈≠ ¿Ãµø
-    // ----------------------------------------------
-    bool match(const string& str)
-    {
-        skipWhitespace();
-
-        if (input.compare(pos, str.length(), str) == 0)
-        {
-            pos += str.length();
+bool Parser::isStmtStart() const {
+    switch (current().type) {
+        case TokenType::ID:
+        case TokenType::LBRACE:
+        case TokenType::KW_IF:
+        case TokenType::KW_WHILE:
+        case TokenType::KW_READ:
+        case TokenType::KW_PRINT:
+        case TokenType::KW_LET:
             return true;
-        }
-
-        return false;
-    }
-
-
-    // ----------------------------------------------
-    // ø¿∑˘ πﬂª˝
-    // ----------------------------------------------
-    void error(const string& message)
-    {
-        throw runtime_error(
-            "Syntax error at position " +
-            to_string(pos) + ": " +
-            message
-        );
-    }
-
-
-    // ==================================================
-    // <number> °Ê <digit> {<digit>}
-    // ==================================================
-
-    Value number()
-    {
-        skipWhitespace();
-
-        if (pos >= input.length() ||
-            !isdigit(input[pos]))
-        {
-            error("number expected");
-        }
-
-        int value = 0;
-
-        while (pos < input.length() &&
-            isdigit(input[pos]))
-        {
-            value = value * 10 + (input[pos] - '0');
-            pos++;
-        }
-
-        return Value::makeInt(value);
-    }
-
-
-    // ==================================================
-    // <factor> °Ê [-] ( <number> | (<aexp>) )
-    //
-    // Ω«¡¶ ¿‘∑¬ øπ¡¶¿Œ !(3>5) µÓ¿ª √≥∏Æ«œ±‚ ¿ß«ÿ
-    // ∞˝»£ æ»ø°¥¬ <expr>µµ «„øÎ
-    // ==================================================
-
-    Value factor()
-    {
-        skipWhitespace();
-
-        bool negative = false;
-
-        // [-]
-        if (match("-"))
-        {
-            negative = true;
-        }
-
-
-        Value value;
-
-
-        // '('
-        if (match("("))
-        {
-            // ø©±‚º≠ æÀæ∆º≠ ∞ËΩ—«ÿ ¡‹
-            value = expr();
-
-            // ')'
-            if (!match(")"))
-            {
-                error("')' expected");
-            }
-        }
-        else
-        {
-            // <number>
-            value = number();
-        }
-
-
-        // ¿Ωºˆ¥¬ ¡§ºˆø° ¥Î«ÿº≠∏∏ ¿˚øÎ
-        if (negative)
-        {
-            if (value.isBool)
-            {
-                error("negative operator cannot be applied to boolean");
-            }
-
-            value.intValue = -value.intValue;
-        }
-
-
-        return value;
-    }
-
-
-    // ==================================================
-    // <term> °Ê <factor> { * <factor> | / <factor> }
-    // ==================================================
-
-    Value term()
-    {
-        Value value = factor();
-
-
-        while (true)
-        {
-            // *
-            if (match("*"))
-            {
-                Value right = factor();
-
-                if (value.isBool || right.isBool)
-                {
-                    error("arithmetic operation requires numbers");
-                }
-
-                value.intValue *= right.intValue;
-            }
-
-
-            // /
-            else if (match("/"))
-            {
-                Value right = factor();
-
-                if (value.isBool || right.isBool)
-                {
-                    error("arithmetic operation requires numbers");
-                }
-
-                if (right.intValue == 0)
-                {
-                    error("division by zero");
-                }
-
-                value.intValue /= right.intValue;
-            }
-
-
-            else
-            {
-                break;
-            }
-        }
-
-
-        return value;
-    }
-
-
-    // ==================================================
-    // <aexp> °Ê <term> { + <term> | - <term> }
-    // ==================================================
-
-    Value aexp()
-    {
-        Value value = term();
-
-
-        while (true)
-        {
-            // +
-            if (match("+"))
-            {
-                Value right = term();
-
-                if (value.isBool || right.isBool)
-                {
-                    error("arithmetic operation requires numbers");
-                }
-
-                value.intValue += right.intValue;
-            }
-
-
-            // -
-            else if (match("-"))
-            {
-                Value right = term();
-
-                if (value.isBool || right.isBool)
-                {
-                    error("arithmetic operation requires numbers");
-                }
-
-                value.intValue -= right.intValue;
-            }
-
-
-            else
-            {
-                break;
-            }
-        }
-
-
-        return value;
-    }
-
-
-    // ==================================================
-    // <relop> °Ê == | != | < | > | <= | >=
-    // ==================================================
-
-    string relop()
-    {
-        if (match("=="))
-            return "==";
-
-        if (match("!="))
-            return "!=";
-
-        if (match("<="))
-            return "<=";
-
-        if (match(">="))
-            return ">=";
-
-        if (match("<"))
-            return "<";
-
-        if (match(">"))
-            return ">";
-
-        return "";
-    }
-
-
-        // ==================================================
-        // <bexp> °Ê <aexp> [<relop> <aexp>]
-        //
-        // true / falseµµ ≥Ì∏ÆΩƒ¿« ««ø¨ªÍ¿⁄∑Œ ªÁøÎ«“ ºˆ ¿÷µµ∑œ
-        // »Æ¿Â«œø© √≥∏Æ
-        // ==================================================
-
-        Value bexp()
-    {
-        skipWhitespace();
-
-        // true
-        if (match("true"))
-        {
-            return Value::makeBool(true);
-        }
-
-        // false
-        if (match("false"))
-        {
-            return Value::makeBool(false);
-        }
-
-        // <aexp>
-        Value left = aexp();
-
-        // <relop>
-        string op = relop();
-
-        // ∫Ò±≥ ø¨ªÍ¿⁄∞° æ¯¥¬ ∞ÊøÏ
-        if (op.empty())
-        {
-            return left;
-        }
-
-        // <aexp>
-        Value right = aexp();
-
-        if (left.isBool || right.isBool)
-        {
-            error("relational operation requires numbers");
-        }
-
-        bool result = false;
-
-        if (op == "==")
-        {
-            result = left.intValue == right.intValue;
-        }
-        else if (op == "!=")
-        {
-            result = left.intValue != right.intValue;
-        }
-        else if (op == "<")
-        {
-            result = left.intValue < right.intValue;
-        }
-        else if (op == ">")
-        {
-            result = left.intValue > right.intValue;
-        }
-        else if (op == "<=")
-        {
-            result = left.intValue <= right.intValue;
-        }
-        else if (op == ">=")
-        {
-            result = left.intValue >= right.intValue;
-        }
-
-        return Value::makeBool(result);
-    }
-
-
-    // ==================================================
-    // <expr> °Ê
-    //
-    // <bexp> { & <bexp> | | <bexp> }
-    // | !<expr>
-    // | true
-    // | false
-    // ==================================================
-
-    Value expr()
-    {
-        skipWhitespace();
-
-
-        // !<expr>
-        if (match("!"))
-        {
-            Value value = expr();
-
-            return Value::makeBool(!value.asBool());
-        }
-
-
-        // true
-        if (match("true"))
-        {
-            return Value::makeBool(true);
-        }
-
-
-        // false
-        if (match("false"))
-        {
-            return Value::makeBool(false);
-        }
-
-
-        // <bexp>
-        Value value = bexp();
-
-
-        while (true)
-        {
-            // & <bexp>
-            if (match("&"))
-            {
-                Value right = bexp();
-
-                value = Value::makeBool(
-                    value.asBool() && right.asBool()
-                );
-            }
-
-
-            // | <bexp>
-            else if (match("|"))
-            {
-                Value right = bexp();
-
-                value = Value::makeBool(
-                    value.asBool() || right.asBool()
-                );
-            }
-
-
-            else
-            {
-                break;
-            }
-        }
-
-
-        return value;
-    }
-
-
-public:
-
-    // ==================================================
-    // ª˝º∫¿⁄
-    // ==================================================
-
-    Parser(const string& str)
-    {
-        input = str;
-        pos = 0;
-    }
-
-
-    // ==================================================
-    // ¿¸√º ¿‘∑¬ ∆ƒΩÃ
-    // ==================================================
-
-    Value parse()
-    {
-        skipWhitespace();
-
-        Value result = expr();
-
-        skipWhitespace();
-
-
-        // ¿‘∑¬¿Ã ∏µŒ √≥∏Æµ«æ˙¥¬¡ˆ »Æ¿Œ
-        if (pos != input.length())
-        {
-            error("unexpected character");
-        }
-
-
-        return result;
-    }
-};
-
-
-// ==================================================
-// ∞·∞˙ √‚∑¬ «‘ºˆ
-// ==================================================
-
-void printValue(const Value& value)
-{
-    if (value.isBool)
-    {
-        if (value.boolValue)
-            cout << "true";
-        else
-            cout << "false";
-    }
-    else
-    {
-        cout << value.intValue;
+        default:
+            return false;
     }
 }
 
-
 // ==================================================
-// main
+// <factor> ‚Üí [ - ] ( number | (<expr>) | id ) | strliteral
+//
+// * Ï∞∏Í≥†: Í∞ïÏùòÏûêÎ£å EBNFÎäî Í¥ÑÌò∏ ÏïàÏùÑ <aexp>Î°úÎßå Î™ÖÏãúÌïòÏßÄÎßå,
+//   Ïã§Ïäµ ÏûÖÎ†• ÏòàÏ†úÏóê "flag = (x>=0);" Ï≤òÎüº ÎπÑÍµêÏãùÏùÑ Í∞êÏãº
+//   Í¥ÑÌò∏Í∞Ä Îì±Ïû•ÌïòÎØÄÎ°ú, Í¥ÑÌò∏ ÏïàÏóêÏÑúÎäî <expr> Ï†ÑÏ≤¥Î•º ÌóàÏö©ÌïòÎèÑÎ°ù
+//   ÏùºÎ∞òÌôîÌñàÎã§. (ÏÇ∞Ïà†ÏãùÎßå ÏûàÏùÑ ÎïåÎäî Í≤∞Íµ≠ <aexp>Î•º ÌååÏã±Ìïú Í≤ÉÍ≥º
+//   ÎèôÏùºÌïòÍ≤å ÎèôÏûëÌïòÎØÄÎ°ú Í∏∞Ï°¥ Î¨∏Î≤ïÍ≥º Ï∂©ÎèåÌïòÏßÄ ÏïäÎäîÎã§.)
 // ==================================================
-
-int main()
-{
-    string input;
-
-    cout << "Parser / Calculator" << endl;
-    cout << "===================" << endl;
-
-    cout << "¿‘∑¬Ωƒ: " << endl;
-
-
-    while (true)
-    {
-        cout << "\n> ";
-
-        getline(cin, input);
-
-
-        // exit ¿‘∑¬ Ω√ ¡æ∑·
-        if (input == "exit")
-        {
-            break;
-        }
-
-
-        try
-        {
-            Parser parser(input);
-
-            Value result = parser.parse();
-
-
-            cout << "∞·∞˙: ";
-            printValue(result);
-            cout << endl;
-        }
-        catch (const exception& e)
-        {
-            cout << "Error: " << e.what() << endl;
-        }
+std::unique_ptr<Expr> Parser::factor() {
+    bool negative = false;
+    if (check(TokenType::MINUS)) {
+        match(TokenType::MINUS);
+        negative = true;
     }
 
+    std::unique_ptr<Expr> value;
 
-    return 0;
+    if (check(TokenType::LPAREN)) {
+        match(TokenType::LPAREN);
+        value = expr();
+        match(TokenType::RPAREN);
+    } else if (check(TokenType::INT_LIT)) {
+        Token t = match(TokenType::INT_LIT);
+        value = std::make_unique<IntLiteral>(std::stoi(t.text));
+    } else if (check(TokenType::ID)) {
+        Token t = match(TokenType::ID);
+        value = std::make_unique<Identifier>(t.text);
+    } else if (check(TokenType::STR_LIT)) {
+        Token t = match(TokenType::STR_LIT);
+        value = std::make_unique<StrLiteral>(t.text);
+    } else {
+        error("number, identifier, string literal or '(' expected");
+    }
+
+    if (negative) {
+        value = std::make_unique<Unary>(std::make_unique<Operator>("-"), std::move(value));
+    }
+
+    return value;
+}
+
+// <term> ‚Üí <factor> { * <factor> | / <factor> }
+std::unique_ptr<Expr> Parser::term() {
+    std::unique_ptr<Expr> e = factor();
+    while (check(TokenType::STAR) || check(TokenType::SLASH)) {
+        std::string opText = current().text;
+        pos++;
+        std::unique_ptr<Expr> rhs = factor();
+        e = std::make_unique<Binary>(std::make_unique<Operator>(opText), std::move(e), std::move(rhs));
+    }
+    return e;
+}
+
+// <aexp> ‚Üí <term> { + <term> | - <term> }
+std::unique_ptr<Expr> Parser::aexp() {
+    std::unique_ptr<Expr> e = term();
+    while (check(TokenType::PLUS) || check(TokenType::MINUS)) {
+        std::string opText = current().text;
+        pos++;
+        std::unique_ptr<Expr> rhs = term();
+        e = std::make_unique<Binary>(std::make_unique<Operator>(opText), std::move(e), std::move(rhs));
+    }
+    return e;
+}
+
+bool Parser::isRelop() const {
+    switch (current().type) {
+        case TokenType::EQ: case TokenType::NEQ:
+        case TokenType::LT: case TokenType::GT:
+        case TokenType::LE: case TokenType::GE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::string Parser::relopText() {
+    std::string t = current().text;
+    pos++;
+    return t;
+}
+
+// <bexp> ‚Üí <aexp> [<relop> <aexp>]
+std::unique_ptr<Expr> Parser::bexp() {
+    std::unique_ptr<Expr> left = aexp();
+    if (isRelop()) {
+        std::string opText = relopText();
+        std::unique_ptr<Expr> right = aexp();
+        return std::make_unique<Binary>(std::make_unique<Operator>(opText), std::move(left), std::move(right));
+    }
+    return left;
+}
+
+// <expr> ‚Üí <bexp> {& <bexp> | '|' <bexp>} | !<expr> | true | false
+std::unique_ptr<Expr> Parser::expr() {
+    if (check(TokenType::NOT)) {
+        match(TokenType::NOT);
+        std::unique_ptr<Expr> e = expr();
+        return std::make_unique<Unary>(std::make_unique<Operator>("!"), std::move(e));
+    }
+    if (check(TokenType::KW_TRUE)) {
+        match(TokenType::KW_TRUE);
+        return std::make_unique<BoolLiteral>(true);
+    }
+    if (check(TokenType::KW_FALSE)) {
+        match(TokenType::KW_FALSE);
+        return std::make_unique<BoolLiteral>(false);
+    }
+
+    std::unique_ptr<Expr> e = bexp();
+    while (check(TokenType::AND) || check(TokenType::OR)) {
+        std::string opText = current().text;
+        pos++;
+        std::unique_ptr<Expr> rhs = bexp();
+        e = std::make_unique<Binary>(std::make_unique<Operator>(opText), std::move(e), std::move(rhs));
+    }
+    return e;
+}
+
+// <type> ‚Üí int | bool | string
+Type Parser::typeSpec() {
+    if (check(TokenType::KW_INT)) { match(TokenType::KW_INT); return Type::INT; }
+    if (check(TokenType::KW_BOOL)) { match(TokenType::KW_BOOL); return Type::BOOL; }
+    if (check(TokenType::KW_STRING)) { match(TokenType::KW_STRING); return Type::STRING; }
+    error("type (int/bool/string) expected");
+    return Type::UNDEF; // ÎèÑÎã¨ÌïòÏßÄ ÏïäÏùå
+}
+
+// <decl> ‚Üí <type> id [=<expr>];
+std::unique_ptr<Decl> Parser::decl() {
+    Type t = typeSpec();
+    Token idTok = match(TokenType::ID);
+    auto id = std::make_unique<Identifier>(idTok.text);
+
+    std::unique_ptr<Expr> init = nullptr;
+    if (check(TokenType::ASSIGN)) {
+        match(TokenType::ASSIGN);
+        init = expr();
+    }
+    match(TokenType::SEMICOLON);
+    return std::make_unique<Decl>(t, std::move(id), std::move(init));
+}
+
+// <stmt> ‚Üí id = <expr>;
+//        | '{' <stmts> '}'
+//        | if (<expr>) then <stmt> [else <stmt>]
+//        | while (<expr>) <stmt>
+//        | read id;
+//        | print <expr>;
+//        | let <decls> in <stmts> end;
+std::unique_ptr<Stmt> Parser::stmt() {
+    if (check(TokenType::ID)) {
+        Token idTok = match(TokenType::ID);
+        auto id = std::make_unique<Identifier>(idTok.text);
+        match(TokenType::ASSIGN);
+        std::unique_ptr<Expr> e = expr();
+        match(TokenType::SEMICOLON);
+        return std::make_unique<Assignment>(std::move(id), std::move(e));
+    }
+
+    if (check(TokenType::LBRACE)) {
+        match(TokenType::LBRACE);
+        auto block = std::make_unique<Block>();
+        block->stmts = stmtsList();
+        match(TokenType::RBRACE);
+        return block;
+    }
+
+    if (check(TokenType::KW_IF)) {
+        match(TokenType::KW_IF);
+        match(TokenType::LPAREN);
+        std::unique_ptr<Expr> cond = expr();
+        match(TokenType::RPAREN);
+        match(TokenType::KW_THEN);
+        std::unique_ptr<Stmt> thenS = stmt();
+
+        auto ifNode = std::make_unique<If>();
+        ifNode->cond = std::move(cond);
+        ifNode->thenStmt = std::move(thenS);
+
+        if (check(TokenType::KW_ELSE)) {
+            match(TokenType::KW_ELSE);
+            ifNode->elseStmt = stmt();
+        }
+        return ifNode;
+    }
+
+    if (check(TokenType::KW_WHILE)) {
+        match(TokenType::KW_WHILE);
+        match(TokenType::LPAREN);
+        std::unique_ptr<Expr> cond = expr();
+        match(TokenType::RPAREN);
+        std::unique_ptr<Stmt> body = stmt();
+
+        auto whileNode = std::make_unique<While>();
+        whileNode->cond = std::move(cond);
+        whileNode->body = std::move(body);
+        return whileNode;
+    }
+
+    if (check(TokenType::KW_READ)) {
+        match(TokenType::KW_READ);
+        Token idTok = match(TokenType::ID);
+        match(TokenType::SEMICOLON);
+        return std::make_unique<Read>(std::make_unique<Identifier>(idTok.text));
+    }
+
+    if (check(TokenType::KW_PRINT)) {
+        match(TokenType::KW_PRINT);
+        std::unique_ptr<Expr> e = expr();
+        match(TokenType::SEMICOLON);
+        return std::make_unique<Print>(std::move(e));
+    }
+
+    if (check(TokenType::KW_LET)) {
+        match(TokenType::KW_LET);
+        auto letNode = std::make_unique<Let>();
+        letNode->decls = declsList();
+        match(TokenType::KW_IN);
+        letNode->stmts = stmtsList();
+        match(TokenType::KW_END);
+        match(TokenType::SEMICOLON);
+        return letNode;
+    }
+
+    error("statement expected");
+    return nullptr; // ÎèÑÎã¨ÌïòÏßÄ ÏïäÏùå
+}
+
+// <stmts> ‚Üí {<stmt>}
+std::vector<std::unique_ptr<Stmt>> Parser::stmtsList() {
+    std::vector<std::unique_ptr<Stmt>> result;
+    while (isStmtStart()) {
+        result.push_back(stmt());
+    }
+    return result;
+}
+
+// <decls> ‚Üí {<decl>}
+std::vector<std::unique_ptr<Decl>> Parser::declsList() {
+    std::vector<std::unique_ptr<Decl>> result;
+    while (isTypeStart()) {
+        result.push_back(decl());
+    }
+    return result;
+}
+
+// <command> ‚Üí <decl> | <stmt>
+std::unique_ptr<Command> Parser::command() {
+    if (isTypeStart()) {
+        return decl();
+    }
+    return stmt();
+}
+
+// <program> ‚Üí {<command>}
+std::unique_ptr<Program> Parser::parseProgram() {
+    auto program = std::make_unique<Program>();
+    while (!check(TokenType::END_OF_INPUT)) {
+        program->commands.push_back(command());
+    }
+    return program;
 }
